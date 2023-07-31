@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"errors"
+
 	"net/http"
 )
 
@@ -88,6 +89,7 @@ type ChatCompletionRequest struct {
 	User         string               `json:"user,omitempty"`
 	Functions    []FunctionDefinition `json:"functions,omitempty"`
 	FunctionCall any                  `json:"function_call,omitempty"`
+	Headers map[string]string      `json:"headers,omitempty"`
 }
 
 type FunctionDefinition struct {
@@ -160,9 +162,15 @@ func (c *Client) CreateChatCompletion(
 		return
 	}
 
+	headers := request.Headers
+	request.Headers = nil // 保持兼容，设置为空
 	req, err := c.newRequest(ctx, http.MethodPost, c.fullURL(urlSuffix, request.Model), withBody(request))
 	if err != nil {
 		return
+	}
+
+	for header, value := range headers {
+		req.Header.Set(header, value)
 	}
 
 	err = c.sendRequest(req, &response)
