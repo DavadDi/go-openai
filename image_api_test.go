@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,7 +38,7 @@ func handleImageEndpoint(w http.ResponseWriter, r *http.Request) {
 	var err error
 	var resBytes []byte
 
-	// imagess only accepts POST requests
+	// images only accepts POST requests
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -86,24 +88,17 @@ func TestImageEdit(t *testing.T) {
 	defer teardown()
 	server.RegisterHandler("/v1/images/edits", handleEditImageEndpoint)
 
-	origin, err := os.Create("image.png")
+	origin, err := os.Create(filepath.Join(t.TempDir(), "image.png"))
 	if err != nil {
-		t.Error("open origin file error")
-		return
+		t.Fatalf("open origin file error: %v", err)
 	}
+	defer origin.Close()
 
-	mask, err := os.Create("mask.png")
+	mask, err := os.Create(filepath.Join(t.TempDir(), "mask.png"))
 	if err != nil {
-		t.Error("open mask file error")
-		return
+		t.Fatalf("open mask file error: %v", err)
 	}
-
-	defer func() {
-		mask.Close()
-		origin.Close()
-		os.Remove("mask.png")
-		os.Remove("image.png")
-	}()
+	defer mask.Close()
 
 	_, err = client.CreateEditImage(context.Background(), openai.ImageEditRequest{
 		Image:          origin,
@@ -121,16 +116,11 @@ func TestImageEditWithoutMask(t *testing.T) {
 	defer teardown()
 	server.RegisterHandler("/v1/images/edits", handleEditImageEndpoint)
 
-	origin, err := os.Create("image.png")
+	origin, err := os.Create(filepath.Join(t.TempDir(), "image.png"))
 	if err != nil {
-		t.Error("open origin file error")
-		return
+		t.Fatalf("open origin file error: %v", err)
 	}
-
-	defer func() {
-		origin.Close()
-		os.Remove("image.png")
-	}()
+	defer origin.Close()
 
 	_, err = client.CreateEditImage(context.Background(), openai.ImageEditRequest{
 		Image:          origin,
@@ -142,11 +132,46 @@ func TestImageEditWithoutMask(t *testing.T) {
 	checks.NoError(t, err, "CreateImage error")
 }
 
+func TestImageEditSendsOptionalFields(t *testing.T) {
+	client, server, teardown := setupOpenAITestServer()
+	defer teardown()
+
+	server.RegisterHandler("/v1/images/edits", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("ParseMultipartForm error: %v", err)
+			http.Error(w, "could not parse multipart form", http.StatusBadRequest)
+			return
+		}
+
+		for field, want := range map[string]string{
+			"model":   openai.CreateImageModelGptImage1,
+			"quality": openai.CreateImageQualityHigh,
+			"user":    "test-user",
+		} {
+			if got := r.FormValue(field); got != want {
+				t.Errorf("%s = %q, want %q", field, got, want)
+			}
+		}
+
+		_, err := fmt.Fprintln(w, `{}`)
+		checks.NoError(t, err, "Write response error")
+	})
+
+	_, err := client.CreateEditImage(context.Background(), openai.ImageEditRequest{
+		Image:   openai.WrapReader(strings.NewReader("image"), "image.png", "image/png"),
+		Prompt:  "There is a turtle in the pool",
+		Model:   openai.CreateImageModelGptImage1,
+		Quality: openai.CreateImageQualityHigh,
+		User:    "test-user",
+	})
+	checks.NoError(t, err, "CreateEditImage error")
+}
+
 // handleEditImageEndpoint Handles the images endpoint by the test server.
 func handleEditImageEndpoint(w http.ResponseWriter, r *http.Request) {
 	var resBytes []byte
 
-	// imagess only accepts POST requests
+	// images only accepts POST requests
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -178,16 +203,11 @@ func TestImageVariation(t *testing.T) {
 	defer teardown()
 	server.RegisterHandler("/v1/images/variations", handleVariateImageEndpoint)
 
-	origin, err := os.Create("image.png")
+	origin, err := os.Create(filepath.Join(t.TempDir(), "image.png"))
 	if err != nil {
-		t.Error("open origin file error")
-		return
+		t.Fatalf("open origin file error: %v", err)
 	}
-
-	defer func() {
-		origin.Close()
-		os.Remove("image.png")
-	}()
+	defer origin.Close()
 
 	_, err = client.CreateVariImage(context.Background(), openai.ImageVariRequest{
 		Image:          origin,
@@ -202,7 +222,7 @@ func TestImageVariation(t *testing.T) {
 func handleVariateImageEndpoint(w http.ResponseWriter, r *http.Request) {
 	var resBytes []byte
 
-	// imagess only accepts POST requests
+	// images only accepts POST requests
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}

@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"errors"
+	"net/http"
 )
 
 var (
@@ -21,7 +22,7 @@ func (c *Client) CreateCompletionStream(
 	ctx context.Context,
 	request CompletionRequest,
 ) (stream *CompletionStream, err error) {
-	urlSuffix := "/completions"
+	urlSuffix := completionsSuffix
 	if !checkEndpointSupportsModel(urlSuffix, request.Model) {
 		err = ErrCompletionUnsupportedModel
 		return
@@ -33,7 +34,12 @@ func (c *Client) CreateCompletionStream(
 	}
 
 	request.Stream = true
-	req, err := c.newRequest(ctx, "POST", c.fullURL(urlSuffix, request.Model), withBody(request))
+	req, err := c.newRequest(
+		ctx,
+		http.MethodPost,
+		c.fullURL(urlSuffix, withModel(request.Model)),
+		withBody(request),
+	)
 	if err != nil {
 		return nil, err
 	}

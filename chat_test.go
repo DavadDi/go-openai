@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -52,6 +53,405 @@ func TestChatCompletionsWrongModel(t *testing.T) {
 	checks.ErrorIs(t, err, openai.ErrChatCompletionInvalidModel, msg)
 }
 
+func TestO1ModelsChatCompletionsDeprecatedFields(t *testing.T) {
+	tests := []struct {
+		name          string
+		in            openai.ChatCompletionRequest
+		expectedError error
+	}{
+		{
+			name: "o1-preview_MaxTokens_deprecated",
+			in: openai.ChatCompletionRequest{
+				MaxTokens: 5,
+				Model:     openai.O1Preview,
+			},
+			expectedError: openai.ErrReasoningModelMaxTokensDeprecated,
+		},
+		{
+			name: "o1-mini_MaxTokens_deprecated",
+			in: openai.ChatCompletionRequest{
+				MaxTokens: 5,
+				Model:     openai.O1Mini,
+			},
+			expectedError: openai.ErrReasoningModelMaxTokensDeprecated,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := openai.DefaultConfig("whatever")
+			config.BaseURL = "http://localhost/v1"
+			client := openai.NewClientWithConfig(config)
+			ctx := context.Background()
+
+			_, err := client.CreateChatCompletion(ctx, tt.in)
+			checks.HasError(t, err)
+			msg := fmt.Sprintf("CreateChatCompletion should return wrong model error, returned: %s", err)
+			checks.ErrorIs(t, err, tt.expectedError, msg)
+		})
+	}
+}
+
+func TestO1ModelsChatCompletionsBetaLimitations(t *testing.T) {
+	tests := []struct {
+		name          string
+		in            openai.ChatCompletionRequest
+		expectedError error
+	}{
+		{
+			name: "log_probs_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				LogProbs:            true,
+				Model:               openai.O1Preview,
+			},
+			expectedError: openai.ErrReasoningModelLimitationsLogprobs,
+		},
+		{
+			name: "set_temperature_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.O1Mini,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				Temperature: float32(2),
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+		{
+			name: "set_top_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.O1Mini,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				Temperature: float32(1),
+				TopP:        float32(0.1),
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+		{
+			name: "set_n_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.O1Mini,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				Temperature: float32(1),
+				TopP:        float32(1),
+				N:           2,
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+		{
+			name: "set_presence_penalty_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.O1Mini,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				PresencePenalty: float32(1),
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+		{
+			name: "set_frequency_penalty_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.O1Mini,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				FrequencyPenalty: float32(0.1),
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := openai.DefaultConfig("whatever")
+			config.BaseURL = "http://localhost/v1"
+			client := openai.NewClientWithConfig(config)
+			ctx := context.Background()
+
+			_, err := client.CreateChatCompletion(ctx, tt.in)
+			checks.HasError(t, err)
+			msg := fmt.Sprintf("CreateChatCompletion should return wrong model error, returned: %s", err)
+			checks.ErrorIs(t, err, tt.expectedError, msg)
+		})
+	}
+}
+
+func TestO3ModelsChatCompletionsBetaLimitations(t *testing.T) {
+	tests := []struct {
+		name          string
+		in            openai.ChatCompletionRequest
+		expectedError error
+	}{
+		{
+			name: "log_probs_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				LogProbs:            true,
+				Model:               openai.O3Mini,
+			},
+			expectedError: openai.ErrReasoningModelLimitationsLogprobs,
+		},
+		{
+			name: "set_temperature_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.O3Mini,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				Temperature: float32(2),
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+		{
+			name: "set_top_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.O3Mini,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				Temperature: float32(1),
+				TopP:        float32(0.1),
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+		{
+			name: "set_n_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.O3Mini,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				Temperature: float32(1),
+				TopP:        float32(1),
+				N:           2,
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+		{
+			name: "set_presence_penalty_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.O3Mini,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				PresencePenalty: float32(1),
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+		{
+			name: "set_frequency_penalty_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.O3Mini,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				FrequencyPenalty: float32(0.1),
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := openai.DefaultConfig("whatever")
+			config.BaseURL = "http://localhost/v1"
+			client := openai.NewClientWithConfig(config)
+			ctx := context.Background()
+
+			_, err := client.CreateChatCompletion(ctx, tt.in)
+			checks.HasError(t, err)
+			msg := fmt.Sprintf("CreateChatCompletion should return wrong model error, returned: %s", err)
+			checks.ErrorIs(t, err, tt.expectedError, msg)
+		})
+	}
+}
+
+func TestGPT5ModelsChatCompletionsBetaLimitations(t *testing.T) {
+	tests := []struct {
+		name          string
+		in            openai.ChatCompletionRequest
+		expectedError error
+	}{
+		{
+			name: "log_probs_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				LogProbs:            true,
+				Model:               openai.GPT5,
+			},
+			expectedError: openai.ErrReasoningModelLimitationsLogprobs,
+		},
+		{
+			name: "set_temperature_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.GPT5Mini,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				Temperature: float32(2),
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+		{
+			name: "set_top_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.GPT5Nano,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				Temperature: float32(1),
+				TopP:        float32(0.1),
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+		{
+			name: "set_n_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.GPT5ChatLatest,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				Temperature: float32(1),
+				TopP:        float32(1),
+				N:           2,
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+		{
+			name: "set_presence_penalty_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.GPT5,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				PresencePenalty: float32(0.1),
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+		{
+			name: "set_frequency_penalty_unsupported",
+			in: openai.ChatCompletionRequest{
+				MaxCompletionTokens: 1000,
+				Model:               openai.GPT5Mini,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+					},
+					{
+						Role: openai.ChatMessageRoleAssistant,
+					},
+				},
+				FrequencyPenalty: float32(0.1),
+			},
+			expectedError: openai.ErrReasoningModelLimitationsOther,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := openai.DefaultConfig("whatever")
+			config.BaseURL = "http://localhost/v1"
+			client := openai.NewClientWithConfig(config)
+			ctx := context.Background()
+
+			_, err := client.CreateChatCompletion(ctx, tt.in)
+			checks.HasError(t, err)
+			msg := fmt.Sprintf("CreateChatCompletion should return wrong model error, returned: %s", err)
+			checks.ErrorIs(t, err, tt.expectedError, msg)
+		})
+	}
+}
+
 func TestChatRequestOmitEmpty(t *testing.T) {
 	data, err := json.Marshal(openai.ChatCompletionRequest{
 		// We set model b/c it's required, so omitempty doesn't make sense
@@ -59,8 +459,8 @@ func TestChatRequestOmitEmpty(t *testing.T) {
 	})
 	checks.NoError(t, err)
 
-	// messages is also required so isn't omitted
-	const expected = `{"model":"gpt-4","messages":null}`
+	// messages is also required so isn't omitted; stream is always present
+	const expected = `{"model":"gpt-4","messages":null,"stream":false}`
 	if string(data) != expected {
 		t.Errorf("expected JSON with all empty fields to be %v but was %v", expected, string(data))
 	}
@@ -87,6 +487,58 @@ func TestChatCompletions(t *testing.T) {
 	_, err := client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
 		MaxTokens: 5,
 		Model:     openai.GPT3Dot5Turbo,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: "Hello!",
+			},
+		},
+	})
+	checks.NoError(t, err, "CreateChatCompletion error")
+}
+
+// TestCompletions Tests the completions endpoint of the API using the mocked server.
+func TestO1ModelChatCompletions(t *testing.T) {
+	client, server, teardown := setupOpenAITestServer()
+	defer teardown()
+	server.RegisterHandler("/v1/chat/completions", handleChatCompletionEndpoint)
+	_, err := client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
+		Model:               openai.O1Preview,
+		MaxCompletionTokens: 1000,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: "Hello!",
+			},
+		},
+	})
+	checks.NoError(t, err, "CreateChatCompletion error")
+}
+
+func TestO3ModelChatCompletions(t *testing.T) {
+	client, server, teardown := setupOpenAITestServer()
+	defer teardown()
+	server.RegisterHandler("/v1/chat/completions", handleChatCompletionEndpoint)
+	_, err := client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
+		Model:               openai.O3Mini,
+		MaxCompletionTokens: 1000,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: "Hello!",
+			},
+		},
+	})
+	checks.NoError(t, err, "CreateChatCompletion error")
+}
+
+func TestDeepseekR1ModelChatCompletions(t *testing.T) {
+	client, server, teardown := setupOpenAITestServer()
+	defer teardown()
+	server.RegisterHandler("/v1/chat/completions", handleDeepseekR1ChatCompletionEndpoint)
+	_, err := client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
+		Model:               "deepseek-reasoner",
+		MaxCompletionTokens: 100,
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    openai.ChatMessageRoleUser,
@@ -277,6 +729,32 @@ func TestChatCompletionsFunctions(t *testing.T) {
 		})
 		checks.NoError(t, err, "CreateChatCompletion with functions error")
 	})
+	t.Run("StructuredOutputs", func(t *testing.T) {
+		type testMessage struct {
+			Count int      `json:"count"`
+			Words []string `json:"words"`
+		}
+		msg := testMessage{
+			Count: 2,
+			Words: []string{"hello", "world"},
+		}
+		_, err := client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
+			MaxTokens: 5,
+			Model:     openai.GPT3Dot5Turbo0613,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: "Hello!",
+				},
+			},
+			Functions: []openai.FunctionDefinition{{
+				Name:       "test",
+				Strict:     true,
+				Parameters: &msg,
+			}},
+		})
+		checks.NoError(t, err, "CreateChatCompletion with functions error")
+	})
 }
 
 func TestAzureChatCompletions(t *testing.T) {
@@ -394,7 +872,7 @@ func TestMultipartChatMessageSerialization(t *testing.T) {
 		t.Fatalf("Unexpected error")
 	}
 	res = strings.ReplaceAll(string(s), " ", "")
-	if res != `{"role":"user","content":""}` {
+	if res != `{"role":"user"}` {
 		t.Fatalf("invalid message: %s", string(s))
 	}
 }
@@ -482,6 +960,68 @@ func handleChatCompletionEndpoint(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, string(resBytes))
 }
 
+func handleDeepseekR1ChatCompletionEndpoint(w http.ResponseWriter, r *http.Request) {
+	var err error
+	var resBytes []byte
+
+	// completions only accepts POST requests
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+	var completionReq openai.ChatCompletionRequest
+	if completionReq, err = getChatCompletionBody(r); err != nil {
+		http.Error(w, "could not read request", http.StatusInternalServerError)
+		return
+	}
+	res := openai.ChatCompletionResponse{
+		ID:      strconv.Itoa(int(time.Now().Unix())),
+		Object:  "test-object",
+		Created: time.Now().Unix(),
+		// would be nice to validate Model during testing, but
+		// this may not be possible with how much upkeep
+		// would be required / wouldn't make much sense
+		Model: completionReq.Model,
+	}
+	// create completions
+	n := completionReq.N
+	if n == 0 {
+		n = 1
+	}
+	if completionReq.MaxCompletionTokens == 0 {
+		completionReq.MaxCompletionTokens = 1000
+	}
+	for i := 0; i < n; i++ {
+		reasoningContent := "User says hello! And I need to reply"
+		completionStr := strings.Repeat("a", completionReq.MaxCompletionTokens-numTokens(reasoningContent))
+		res.Choices = append(res.Choices, openai.ChatCompletionChoice{
+			Message: openai.ChatCompletionMessage{
+				Role:             openai.ChatMessageRoleAssistant,
+				ReasoningContent: reasoningContent,
+				Content:          completionStr,
+			},
+			Index: i,
+		})
+	}
+	inputTokens := numTokens(completionReq.Messages[0].Content) * n
+	completionTokens := completionReq.MaxTokens * n
+	res.Usage = openai.Usage{
+		PromptTokens:     inputTokens,
+		CompletionTokens: completionTokens,
+		TotalTokens:      inputTokens + completionTokens,
+	}
+	resBytes, _ = json.Marshal(res)
+	w.Header().Set(xCustomHeader, xCustomHeaderValue)
+	for k, v := range rateLimitHeaders {
+		switch val := v.(type) {
+		case int:
+			w.Header().Set(k, strconv.Itoa(val))
+		default:
+			w.Header().Set(k, fmt.Sprintf("%s", v))
+		}
+	}
+	fmt.Fprintln(w, string(resBytes))
+}
+
 // getChatCompletionBody Returns the body of the request to create a completion.
 func getChatCompletionBody(r *http.Request) (openai.ChatCompletionRequest, error) {
 	completion := openai.ChatCompletionRequest{}
@@ -525,5 +1065,198 @@ func TestFinishReason(t *testing.T) {
 		if !strings.Contains(string(resBytes), fmt.Sprintf(`"finish_reason":"%s"`, r)) {
 			t.Errorf("%s should be quoted", r)
 		}
+	}
+}
+
+func TestChatCompletionResponseFormatJSONSchema_UnmarshalJSON(t *testing.T) {
+	type args struct {
+		data []byte
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			"",
+			args{
+				data: []byte(`{
+      "name":   "math_response",
+      "strict": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "explanation": { "type": "string" },
+                "output":      { "type": "string" }
+              },
+              "required": ["explanation","output"],
+              "additionalProperties": false
+            }
+          },
+          "final_answer": { "type": "string" }
+        },
+        "required": ["steps","final_answer"],
+        "additionalProperties": false
+      }
+  }`),
+			},
+			false,
+		},
+		{
+			"",
+			args{
+				data: []byte(`{
+      "name":   "math_response",
+      "strict": true,
+      "schema": null
+  }`),
+			},
+			false,
+		},
+		{
+			"",
+			args{
+				data: []byte(`[123,456]`),
+			},
+			true,
+		},
+		{
+			"",
+			args{
+				data: []byte(`{
+      "name":   "math_response",
+      "strict": true,
+      "schema": 123456
+  }`),
+			},
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var r openai.ChatCompletionResponseFormatJSONSchema
+			err := r.UnmarshalJSON(tt.args.data)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("UnmarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// Keywords the typed jsonschema.Definition doesn't model (anyOf, title, $defs,
+// $ref, ...) must survive an unmarshal → marshal round-trip instead of being
+// silently dropped.
+func TestChatCompletionResponseFormatJSONSchema_UnmarshalPreservesSchema(t *testing.T) {
+	schema := `{"type":"object","title":"Root",` +
+		`"properties":{"summary":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Summary"}},` +
+		`"required":["summary"],"additionalProperties":false}`
+	data := []byte(`{"name":"s","strict":true,"schema":` + schema + `}`)
+
+	var r openai.ChatCompletionResponseFormatJSONSchema
+	if err := r.UnmarshalJSON(data); err != nil {
+		t.Fatalf("UnmarshalJSON() error = %v", err)
+	}
+
+	got, err := json.Marshal(r.Schema)
+	if err != nil {
+		t.Fatalf("Marshal(schema) error = %v", err)
+	}
+	var gotMap, wantMap map[string]any
+	if err = json.Unmarshal(got, &gotMap); err != nil {
+		t.Fatalf("unmarshal got = %v", err)
+	}
+	if err = json.Unmarshal([]byte(schema), &wantMap); err != nil {
+		t.Fatalf("unmarshal want = %v", err)
+	}
+	if !reflect.DeepEqual(gotMap, wantMap) {
+		t.Errorf("schema not preserved:\n got  %s\n want %s", got, schema)
+	}
+}
+
+func TestChatCompletionRequest_UnmarshalJSON(t *testing.T) {
+	type args struct {
+		bs []byte
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			"",
+			args{bs: []byte(`{
+  "model": "llama3-1b",
+  "messages": [
+    { "role": "system", "content": "You are a helpful math tutor." },
+    { "role": "user",   "content": "solve 8x + 31 = 2" }
+  ],
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name":   "math_response",
+      "strict": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "explanation": { "type": "string" },
+                "output":      { "type": "string" }
+              },
+              "required": ["explanation","output"],
+              "additionalProperties": false
+            }
+          },
+          "final_answer": { "type": "string" }
+        },
+        "required": ["steps","final_answer"],
+        "additionalProperties": false
+      }
+    }
+  }
+}`)},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var m openai.ChatCompletionRequest
+			err := json.Unmarshal(tt.args.bs, &m)
+			if err != nil {
+				t.Errorf("UnmarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestChatCompletionRequest_StreamFalsePresent(t *testing.T) {
+	req := openai.ChatCompletionRequest{
+		Model: openai.GPT4,
+		Messages: []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleUser, Content: "hello"},
+		},
+		Stream: false,
+	}
+	b, err := json.Marshal(req)
+	checks.NoError(t, err, "marshal error")
+
+	var raw map[string]interface{}
+	err = json.Unmarshal(b, &raw)
+	checks.NoError(t, err, "unmarshal error")
+
+	val, exists := raw["stream"]
+	if !exists {
+		t.Fatal("expected \"stream\" field to be present in JSON, but it was omitted")
+	}
+	if val != false {
+		t.Fatalf("expected \"stream\" to be false, got %v", val)
 	}
 }

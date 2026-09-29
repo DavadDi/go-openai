@@ -1,27 +1,55 @@
 name: Sanity check
 
 on:
-  - push
-  - pull_request
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   prcheck:
     name: Sanity check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v7
     - name: Setup Go
-      uses: actions/setup-go@v2
+      uses: actions/setup-go@v7
       with:
-        go-version: '1.19'
-    - name: Run vet
+        go-version: 1.27.x
+    - name: Check Go version compatibility
       run: |
-        go vet .
+        go vet -stdversion ./...
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v3
+      uses: golangci/golangci-lint-action@v9
       with:
-        version: latest
+        version: v2.13.2
     - name: Run tests
-      run: go test -race -covermode=atomic -coverprofile=coverage.out -v .
+      run: go test -race -covermode=atomic -coverprofile=coverage.out -v ./...
     - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v3
+      if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+      uses: codecov/codecov-action@v7
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+  compatibility:
+    name: Go 1.18 compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v7
+    - name: Setup Go
+      uses: actions/setup-go@v7
+      with:
+        go-version: 1.18.x
+    - name: Run tests
+      run: go test ./...

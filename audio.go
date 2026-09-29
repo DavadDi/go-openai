@@ -3,6 +3,7 @@ package openai
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,9 +12,13 @@ import (
 	utils "github.com/sashabaranov/go-openai/internal"
 )
 
-// Whisper Defines the models provided by OpenAI to use when processing audio with OpenAI.
+// Audio transcription models provided by OpenAI.
 const (
-	Whisper1 = "whisper-1"
+	Whisper1               = "whisper-1"
+	GPT4oTranscribe        = "gpt-4o-transcribe"
+	GPT4oMiniTranscribe    = "gpt-4o-mini-transcribe"
+	GPT4oTranscribeDiarize = "gpt-4o-transcribe-diarize"
+	GPTTranscribe          = "gpt-transcribe"
 )
 
 // Response formats; Whisper uses AudioResponseFormatJSON by default.
@@ -27,8 +32,24 @@ const (
 	AudioResponseFormatVTT         AudioResponseFormat = "vtt"
 )
 
+type TranscriptionTimestampGranularity string
+
+const (
+	TranscriptionTimestampGranularityWord    TranscriptionTimestampGranularity = "word"
+	TranscriptionTimestampGranularitySegment TranscriptionTimestampGranularity = "segment"
+)
+
+// TranscriptionChunkingStrategy configures server-side VAD chunking for transcription.
+// Assign it to AudioRequest.ChunkingStrategy when you need explicit control; pass the
+// string "auto" instead to let the server pick the boundaries.
+type TranscriptionChunkingStrategy struct {
+	Type              string  `json:"type"` // "server_vad"
+	PrefixPaddingMs   int     `json:"prefix_padding_ms,omitempty"`
+	SilenceDurationMs int     `json:"silence_duration_ms,omitempty"`
+	Threshold         float64 `json:"threshold,omitempty"`
+}
+
 // AudioRequest represents a request structure for audio API.
-// ResponseFormat is not supported for now. We only return JSON text, which may be sufficient.
 type AudioRequest struct {
 	Model string
 
@@ -38,10 +59,16 @@ type AudioRequest struct {
 	// Reader is an optional io.Reader when you do not want to use an existing file.
 	Reader io.Reader
 
-	Prompt      string // For translation, it should be in English
-	Temperature float32
-	Language    string // For translation, just do not use it. It seems "en" works, not confirmed...
-	Format      AudioResponseFormat
+	Prompt                 string
+	Temperature            float32
+	Language               string // Only for transcription.
+	Format                 AudioResponseFormat
+	TimestampGranularities []TranscriptionTimestampGranularity // Only for transcription.
+
+	// ChunkingStrategy controls how the audio is split before processing. Diarization models
+	// such as gpt-4o-transcribe-diarize require it on longer audio, otherwise the API rejects
+	// the request. Pass the string "auto" or a TranscriptionChunkingStrategy. Only for transcription.
+	ChunkingStrategy any
 }
 
 // AudioResponse represents a response structure for audio API.
@@ -62,6 +89,11 @@ type AudioResponse struct {
 		NoSpeechProb     float64 `json:"no_speech_prob"`
 		Transient        bool    `json:"transient"`
 	} `json:"segments"`
+	Words []struct {
+		Word  string  `json:"word"`
+		Start float64 `json:"start"`
+		End   float64 `json:"end"`
+	} `json:"words"`
 	Text string `json:"text"`
 
 	httpHeader
@@ -110,8 +142,13 @@ func (c *Client) callAudioAPI(
 	}
 
 	urlSuffix := fmt.Sprintf("/audio/%s", endpointSuffix)
-	req, err := c.newRequest(ctx, http.MethodPost, c.fullURL(urlSuffix, request.Model),
-		withBody(&formBody), withContentType(builder.FormDataContentType()))
+	req, err := c.newRequest(
+		ctx,
+		http.MethodPost,
+		c.fullURL(urlSuffix, withModel(request.Model)),
+		withBody(&formBody),
+		withContentType(builder.FormDataContentType()),
+	)
 	if err != nil {
 		return AudioResponse{}, err
 	}
@@ -179,8 +216,49 @@ func audioMultipartForm(request AudioRequest, b utils.FormBuilder) error {
 		}
 	}
 
+	// Create form fields for the timestamp granularities (if provided)
+	if err = writeTimestampGranularities(request.TimestampGranularities, b); err != nil {
+		return err
+	}
+
+	// Create a form field for the chunking strategy (if provided)
+	if err = writeChunkingStrategy(request.ChunkingStrategy, b); err != nil {
+		return err
+	}
+
 	// Close the multipart writer
 	return b.Close()
+}
+
+func writeTimestampGranularities(granularities []TranscriptionTimestampGranularity, b utils.FormBuilder) error {
+	for _, tg := range granularities {
+		if err := b.WriteField("timestamp_granularities[]", string(tg)); err != nil {
+			return fmt.Errorf("writing timestamp_granularities[]: %w", err)
+		}
+	}
+	return nil
+}
+
+// writeChunkingStrategy serializes ChunkingStrategy into the multipart form. A plain string
+// such as "auto" is sent verbatim; anything else is JSON-encoded (e.g. server_vad config).
+func writeChunkingStrategy(strategy any, b utils.FormBuilder) error {
+	if strategy == nil {
+		return nil
+	}
+
+	value, ok := strategy.(string)
+	if !ok {
+		data, err := json.Marshal(strategy)
+		if err != nil {
+			return fmt.Errorf("marshaling chunking_strategy: %w", err)
+		}
+		value = string(data)
+	}
+
+	if err := b.WriteField("chunking_strategy", value); err != nil {
+		return fmt.Errorf("writing chunking_strategy: %w", err)
+	}
+	return nil
 }
 
 // createFileField creates the "file" form field from either an existing file or by using the reader.
